@@ -2,28 +2,41 @@ import asyncio
 import aiohttp
 import json
 from typing import List
+from ipaddress import IPv4Network
 
 
-async def get_header(host: str, port: int, timeout: int):
-    async with aiohttp.ClientSession() as session:
+def _explode_cidrs(cidr: str):
+    try:
+        return [str(ip).split('/', 1)[0] for ip in IPv4Network(cidr)]
+    except:
+        return cidr
+
+
+async def get_header(host: str, port: int, timeout: int, session):
+    results = {"host": host, "port": port}
+    try:
+        async with session.head(f"https://{host}:{port}", verify_ssl=False, timeout=timeout) as response:
+            results["headers"] = dict(**response.headers)
+    except:
         try:
-            async with session.head(f"https://{host}:{port}", verify_ssl=False, timeout=timeout) as response:
-                return dict(**response.headers)
+            async with session.head(f"http://{host}:{port}", timeout=1) as response:
+                results["headers"] = dict(**response.headers)
         except:
-            try:
-                async with session.head(f"http://{host}:{port}", timeout=1) as response:
-                    return dict(**response.headers)
-            except:
-                return None
+            results["headers"] = None
+    return results
 
 
 async def run(targets: List[str], ports: List[int], outfile: str, timeout: int = 3):
     # Build a list of (target, port) 2-tuples
-    host_port_combos = [(target, port) for target in targets for port in ports]
-    results = [{"host": hpc[0], "port": hpc[1], "headers": await get_header(*hpc, timeout=timeout)} for hpc in host_port_combos]
+    host_port_combos = [(_ip, port) for cidr in targets for _ip in _explode_cidrs(cidr) for port in ports]
+    print(f"Got {len(host_port_combos)} host:port combinations")
+    loop = asyncio.get_event_loop()
+    session = aiohttp.ClientSession()
+    tasks = [loop.create_task(get_header(*hpc, timeout=timeout, session=session)) for hpc in host_port_combos]
+    results = await asyncio.gather(*tasks)
     with open(outfile, "w") as o_file:
         json.dump(results, o_file, indent=2)
-
+    await session.close()
 
 if __name__ == '__main__':
 
@@ -52,8 +65,7 @@ if __name__ == '__main__':
             _targets = [x.strip() for x in f.read().split('\n')]
 
     _ports = [int(x.strip()) for x in args.ports.split(',')]
-    el = asyncio.get_event_loop()
-    el.run_until_complete(run(_targets, _ports, args.outfile, args.timeout))
+    asyncio.run(run(_targets, _ports, args.outfile, args.timeout))
 
 
 
