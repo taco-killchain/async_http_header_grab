@@ -29,14 +29,12 @@ async def get_header(host: str, port: int, timeout: int, session):
 async def run(targets: List[str], ports: List[int], outfile: str, timeout: int = 3):
     # Build a list of (target, port) 2-tuples
     host_port_combos = [(_ip, port) for cidr in targets for _ip in _explode_cidrs(cidr) for port in ports]
-    print(f"Got {len(host_port_combos)} host:port combinations")
     loop = asyncio.get_event_loop()
     session = aiohttp.ClientSession()
     tasks = [loop.create_task(get_header(*hpc, timeout=timeout, session=session)) for hpc in host_port_combos]
     results = await asyncio.gather(*tasks)
     with open(outfile, "w") as o_file:
         json.dump(results, o_file, indent=2)
-    await session.close()
 
 if __name__ == '__main__':
 
