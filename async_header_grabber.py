@@ -26,7 +26,7 @@ async def get_header(host: str, port: int, timeout: int, session):
     return results
 
 
-async def run(targets: List[str], ports: List[int], outfile: str, timeout: int = 3):
+async def run(targets: List[str], ports: List[int], outfile: str, timeout: int = 5):
     # Build a list of (target, port) 2-tuples
     host_port_combos = [(_ip, port) for cidr in targets for _ip in _explode_cidrs(cidr) for port in ports]
     loop = asyncio.get_event_loop()
@@ -38,6 +38,7 @@ async def run(targets: List[str], ports: List[int], outfile: str, timeout: int =
 
 if __name__ == '__main__':
 
+    import time
     import argparse
 
     parser = argparse.ArgumentParser()
@@ -63,7 +64,11 @@ if __name__ == '__main__':
             _targets = [x.strip() for x in f.read().split('\n')]
 
     _ports = [int(x.strip()) for x in args.ports.split(',')]
+
+    start_time = time.time()
     asyncio.run(run(_targets, _ports, args.outfile, args.timeout))
+    end_time = time.time()
+    print(f"Processed {len(_targets)} in {round(end_time - start_time, 2)} seconds")
 
 
 
