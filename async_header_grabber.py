@@ -13,9 +13,10 @@ def _explode_cidrs(cidr: str):
 
 
 async def get_header(host: str, port: int, timeout: int, session):
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36"}
     results = {"host": host, "port": port}
     try:
-        async with session.head(f"https://{host}:{port}", verify_ssl=False, timeout=timeout) as response:
+        async with session.head(f"https://{host}:{port}", verify_ssl=False, timeout=timeout, headers=headers) as response:
             results["headers"] = dict(**response.headers)
     except:
         try:
