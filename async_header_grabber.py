@@ -20,7 +20,7 @@ async def get_header(host: str, port: int, timeout: int, session):
             results["headers"] = dict(**response.headers)
     except:
         try:
-            async with session.head(f"http://{host}:{port}", timeout=1) as response:
+            async with session.head(f"http://{host}:{port}", timeout=timeout, headers=headers) as response:
                 results["headers"] = dict(**response.headers)
         except:
             results["headers"] = None
