@@ -33,7 +33,11 @@ async def run(targets: List[str], ports: List[int], outfile: str, timeout: int =
     loop = asyncio.get_event_loop()
     session = aiohttp.ClientSession()
     tasks = [loop.create_task(get_header(*hpc, timeout=timeout, session=session)) for hpc in host_port_combos]
-    results = await asyncio.gather(*tasks)
+    tasks_separated = [tasks[i:i + 10] for i in range(0, len(tasks), 10)]
+    results = []
+    for task_set in tasks_separated:
+        task_set_results = await asyncio.gather(*task_set)
+        results.extend(task_set_results)
     with open(outfile, "w") as o_file:
         json.dump(results, o_file, indent=2)
 
