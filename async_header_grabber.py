@@ -12,37 +12,37 @@ def _explode_cidrs(cidr: str):
         return cidr
 
 
-async def get_header(host: str, port: int, timeout: int, session):
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36"}
-    results = {"host": host, "port": port}
-    try:
-        async with session.head(f"https://{host}:{port}", verify_ssl=False, timeout=timeout, headers=headers) as response:
-            results["headers"] = dict(**response.headers)
-    except:
+async def get_header(semaphore, host: str, port: int, timeout: int, session):
+    async with semaphore:
+        results = {"host": host, "port": port}
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36"}
         try:
-            async with session.head(f"http://{host}:{port}", timeout=timeout, headers=headers) as response:
+            async with session.head(f"https://{host}:{port}", verify_ssl=False, timeout=timeout, headers=headers) as response:
                 results["headers"] = dict(**response.headers)
-        except:
-            results["headers"] = None
-    return results
+        except Exception as e:
+            try:
+                async with session.head(f"http://{host}:{port}", timeout=timeout, headers=headers) as response:
+                    results["headers"] = dict(**response.headers)
+            except Exception as e:
+                results["headers"] = None
+        print(results)
+        return results
 
 
 async def run(targets: List[str], ports: List[int], outfile: str, timeout: int = 5):
     # Build a list of (target, port) 2-tuples
     host_port_combos = [(_ip, port) for cidr in targets for _ip in _explode_cidrs(cidr) for port in ports]
-    loop = asyncio.get_event_loop()
-    session = aiohttp.ClientSession()
-    tasks = [loop.create_task(get_header(*hpc, timeout=timeout, session=session)) for hpc in host_port_combos]
-    tasks_separated = [tasks[i:i + 10] for i in range(0, len(tasks), 10)]
-    results = []
-    for task_set in tasks_separated:
-        task_set_results = await asyncio.gather(*task_set)
-        results.extend(task_set_results)
+    semaphore = asyncio.Semaphore(10)  # Limit concurrent connections
+    async with aiohttp.ClientSession() as session:
+        tasks = [get_header(semaphore, *hpc, timeout=timeout, session=session) for hpc in host_port_combos]
+        results = await asyncio.gather(*tasks)
+
     with open(outfile, "w") as o_file:
         json.dump(results, o_file, indent=2)
 
-if __name__ == '__main__':
 
+def main():
     import time
     import argparse
 
@@ -73,7 +73,9 @@ if __name__ == '__main__':
     start_time = time.time()
     asyncio.run(run(_targets, _ports, args.outfile, args.timeout))
     end_time = time.time()
-    print(f"Processed {len(_targets)} in {round(end_time - start_time, 2)} seconds")
+
+    print(f"Total time taken: {end_time - start_time} seconds")
 
 
-
+if __name__ == '__main__':
+    main()
