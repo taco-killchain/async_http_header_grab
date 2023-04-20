@@ -15,41 +15,60 @@ def _explode_cidrs(cidr: str):
         return cidr
 
 
-async def get_header(semaphore, host: str, port: int, timeout: int, session, outfile):
-    async with semaphore:
-        results = {"host": host, "port": port}
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36"}
+async def get_header(host: str, port: int, timeout: int, session):
+    results = {"host": host, "port": port}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36"}
+    try:
+        async with session.head(f"https://{host}:{port}", verify_ssl=False, timeout=timeout, headers=headers) as response:
+            results["headers"] = dict(**response.headers)
+    except Exception as e:
         try:
-            async with session.head(f"https://{host}:{port}", verify_ssl=False, timeout=timeout, headers=headers) as response:
+            async with session.head(f"http://{host}:{port}", timeout=timeout, headers=headers) as response:
                 results["headers"] = dict(**response.headers)
         except Exception as e:
-            try:
-                async with session.head(f"http://{host}:{port}", timeout=timeout, headers=headers) as response:
-                    results["headers"] = dict(**response.headers)
-            except Exception as e:
-                results["headers"] = None
-        print(results)
+            results["headers"] = None
+    print(results)
+    return results
 
-        with lock:
-            with open(outfile, "a") as o_file:
-                o_file.write(json.dumps(results) + "\n")
+
+async def worker(queue, session, timeout):
+    results = []
+    while True:
+        hpc = await queue.get()
+        if hpc is None:
+            break
+        result = await get_header(*hpc, timeout=timeout, session=session)
+        results.append(result)
+        queue.task_done()
+    return results
 
 
 async def run(targets: List[str], ports: List[int], outfile: str, timeout: int = 5):
-    # Initialize the outfile with an empty list
-    with open(outfile, "w") as o_file:
-        o_file.write("")
-
     # Build a list of (target, port) 2-tuples
     host_port_combos = [(_ip, port) for cidr in targets for _ip in _explode_cidrs(cidr) for port in ports]
-    semaphore = asyncio.Semaphore(10)  # Limit concurrent connections
+
     async with aiohttp.ClientSession() as session:
-        tasks = [get_header(semaphore, *hpc, timeout=timeout, session=session, outfile=outfile) for hpc in host_port_combos]
-        await asyncio.gather(*tasks)
+        queue = asyncio.Queue()
+        for hpc in host_port_combos:
+            await queue.put(hpc)
+
+        workers = [asyncio.create_task(worker(queue, session, timeout)) for _ in range(10)]
+
+        await queue.join()
+
+        for _ in workers:
+            await queue.put(None)
+
+        all_results = await asyncio.gather(*workers)
+
+    # Flatten the list of lists of results and write them to the output file
+    with open(outfile, "w") as o_file:
+        flat_results = [item for sublist in all_results for item in sublist]
+        json.dump(flat_results, o_file, indent=2)
 
 
-def main():
+if __name__ == '__main__':
     import time
     import argparse
 
@@ -65,7 +84,7 @@ def main():
     parser.add_argument("--outfile",
                         help="The file to which we want to dump our results",
                         default="/tmp/scan_results.json")
-    parser.add_argument("--timeout", help="Timeout for the HTTP connection", default=3, type=int)
+    parser.add_argument("--timeout", help="Timeout for the HTTP connection", default=1, type=int)
 
     args = parser.parse_args()
 
@@ -82,7 +101,3 @@ def main():
     end_time = time.time()
 
     print(f"Total time taken: {end_time - start_time} seconds")
-
-
-if __name__ == '__main__':
-    main()
