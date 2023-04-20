@@ -3,6 +3,9 @@ import aiohttp
 import json
 from typing import List
 from ipaddress import IPv4Network
+import threading
+
+lock = threading.Lock()
 
 
 def _explode_cidrs(cidr: str):
@@ -12,7 +15,7 @@ def _explode_cidrs(cidr: str):
         return cidr
 
 
-async def get_header(semaphore, host: str, port: int, timeout: int, session):
+async def get_header(semaphore, host: str, port: int, timeout: int, session, outfile):
     async with semaphore:
         results = {"host": host, "port": port}
         headers = {
@@ -27,19 +30,23 @@ async def get_header(semaphore, host: str, port: int, timeout: int, session):
             except Exception as e:
                 results["headers"] = None
         print(results)
-        return results
+
+        with lock:
+            with open(outfile, "a") as o_file:
+                o_file.write(json.dumps(results) + "\n")
 
 
 async def run(targets: List[str], ports: List[int], outfile: str, timeout: int = 5):
+    # Initialize the outfile with an empty list
+    with open(outfile, "w") as o_file:
+        o_file.write("")
+
     # Build a list of (target, port) 2-tuples
     host_port_combos = [(_ip, port) for cidr in targets for _ip in _explode_cidrs(cidr) for port in ports]
     semaphore = asyncio.Semaphore(10)  # Limit concurrent connections
     async with aiohttp.ClientSession() as session:
-        tasks = [get_header(semaphore, *hpc, timeout=timeout, session=session) for hpc in host_port_combos]
-        results = await asyncio.gather(*tasks)
-
-    with open(outfile, "w") as o_file:
-        json.dump(results, o_file, indent=2)
+        tasks = [get_header(semaphore, *hpc, timeout=timeout, session=session, outfile=outfile) for hpc in host_port_combos]
+        await asyncio.gather(*tasks)
 
 
 def main():
