@@ -28,7 +28,6 @@ async def get_header(host: str, port: int, timeout: int, session):
                 results["headers"] = dict(**response.headers)
         except Exception as e:
             results["headers"] = None
-    print(results)
     return results
 
 
